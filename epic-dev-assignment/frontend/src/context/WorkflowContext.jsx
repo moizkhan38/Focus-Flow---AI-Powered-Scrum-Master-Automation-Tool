@@ -63,9 +63,14 @@ export function WorkflowProvider({ children }) {
 
   const [state, setState] = useState(initialState);
 
-  // Auto-save to localStorage
+  // Auto-save to localStorage — wrapped so quota-exceeded / private-mode errors
+  // don't crash the wizard. State still works in memory; only persistence fails.
   useEffect(() => {
-    localStorage.setItem('epic-workflow-state', JSON.stringify(state));
+    try {
+      localStorage.setItem('epic-workflow-state', JSON.stringify(state));
+    } catch (err) {
+      console.warn('[Workflow] Could not persist state to localStorage:', err.message);
+    }
   }, [state]);
 
   const actions = {
@@ -408,21 +413,27 @@ export function WorkflowProvider({ children }) {
         const newDev = prev.developers.find(d => d.username === newDeveloperUsername);
         if (!newDev) return prev;
 
-        // Recalculate expertise match for the new developer
-        const epicType = oldAssignment.epic.classification?.primary || "Full Stack";
+        // Recalculate expertise match for the new developer.
+        // Fresh devs have analysis.expertise.*, roster devs have flat primary_expertise/experience_level.
+        const epicType = oldAssignment.epic?.classification?.primary || "Full Stack";
         const allExpertise = newDev.analysis?.expertise?.all || [];
+        const primaryExpertise = newDev.analysis?.expertise?.primary || newDev.primary_expertise;
         const expertiseMatch = allExpertise.find(e => e.name === epicType);
         const maxScore = Math.max(...allExpertise.map(e => e.score), 1);
 
         let expertisePoints = 0;
         if (expertiseMatch) {
           expertisePoints = Math.round((expertiseMatch.score / maxScore) * 50);
-        } else if (newDev.analysis?.expertise?.primary === "Full Stack") {
+        } else if (primaryExpertise === "Full Stack") {
           expertisePoints = Math.min(30, Math.round((allExpertise.length / 5) * 30));
+        } else if (primaryExpertise === epicType) {
+          // Roster dev with matching expertise but no detailed `all` array — give a reasonable score
+          expertisePoints = 35;
         }
 
         const experienceMap = { "Senior": 30, "Mid-Level": 20, "Junior": 10, "Beginner": 5 };
-        const experiencePoints = experienceMap[newDev.analysis?.experienceLevel?.level] || 5;
+        const experienceLevel = newDev.analysis?.experienceLevel?.level || newDev.experience_level;
+        const experiencePoints = experienceMap[experienceLevel] || 5;
         const recalcScore = expertisePoints + experiencePoints;
         const hasExpertise = expertisePoints > 0;
 
