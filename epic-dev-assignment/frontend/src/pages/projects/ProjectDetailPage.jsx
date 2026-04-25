@@ -1148,11 +1148,14 @@ function ProjectStandupReports({ projectKey }) {
                       <span className="ml-auto text-[10px] text-gray-400">{ts ? ts.toLocaleString() : ''}</span>
                       <ChevronDown className={`h-3 w-3 text-gray-300 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                     </div>
-                    {!isOpen && <p className="text-[11px] text-gray-500 mt-1 truncate">{s.ai_summary_today || s.ai_summary_yesterday || ''}</p>}
+                    {!isOpen && <p className="text-[11px] text-gray-500 mt-1 truncate">{s.today || s.ai_summary_today || s.yesterday || s.ai_summary_yesterday || ''}</p>}
                     {isOpen && (
                       <div className="mt-3 pt-2 border-t border-gray-100 space-y-2 text-xs">
-                        <div><span className="font-semibold text-gray-500">Yesterday:</span> <span className="text-gray-700">{s.ai_summary_yesterday || '-'}</span></div>
-                        <div><span className="font-semibold text-gray-500">Today:</span> <span className="text-gray-700">{s.ai_summary_today || '-'}</span></div>
+                        <div><span className="font-semibold text-gray-500">Yesterday:</span> <span className="text-gray-700">{s.yesterday || s.ai_summary_yesterday || '-'}</span></div>
+                        <div><span className="font-semibold text-gray-500">Today:</span> <span className="text-gray-700">{s.today || s.ai_summary_today || '-'}</span></div>
+                        {s.blocker && s.blocker !== 'None' && (
+                          <div><span className="font-semibold text-gray-500">Blockers:</span> <span className="text-gray-700">{s.blocker}</span></div>
+                        )}
                         {s.is_blocker && s.blocker_details && (
                           <div className="rounded-lg bg-rose-50 border border-rose-200 p-2">
                             <p className="font-semibold text-rose-600 text-[10px] uppercase mb-1">Blocker</p>
