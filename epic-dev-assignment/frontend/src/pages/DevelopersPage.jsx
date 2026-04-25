@@ -4,7 +4,7 @@ import { useProjects } from '../hooks/useProjects';
 import {
   Users, Search, Trash2, Save, ChevronDown, ChevronRight,
   Briefcase, GitBranch, Award, AlertCircle, Plus, X, Loader2, UserPlus,
-  Circle, Clock, Palmtree,
+  Circle, Clock, Palmtree, RefreshCw,
 } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
 
@@ -23,6 +23,39 @@ export default function DevelopersPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState('');
   const [analyzeError, setAnalyzeError] = useState('');
+
+  // Refresh-from-GitHub state
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefreshAll = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const res = await fetch('/api/db/developers/refresh', { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).error || 'Refresh failed');
+      const data = await res.json();
+      // Map DB rows back into the localStorage roster shape and merge in.
+      const refreshed = (data.developers || []).map(d => ({
+        username: d.username,
+        jiraUsername: d.jira_username || '',
+        avatar_url: d.avatar_url,
+        primary_expertise: d.primary_expertise,
+        experience_level: d.experience_level,
+        top_skills: d.top_skills || [],
+        analysis: d.analysis,
+        availability: d.availability,
+      }));
+      if (refreshed.length > 0) addDevelopers(refreshed);
+      notify.success(
+        'Developers Refreshed',
+        `${data.updated}/${data.total} updated from GitHub${data.failed ? ` (${data.failed} failed)` : ''}`
+      );
+    } catch (err) {
+      notify.error('Refresh Failed', err.message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Build assignment data per developer across all projects
   const devAssignments = useMemo(() => {
@@ -180,13 +213,24 @@ export default function DevelopersPage() {
             {developers.length} developer{developers.length !== 1 ? 's' : ''} in roster
           </p>
         </div>
-        <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 transition-colors"
-        >
-          <UserPlus className="h-4 w-4" />
-          Add Developer
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefreshAll}
+            disabled={refreshing || developers.length === 0}
+            title="Re-fetch every developer's GitHub stats (also runs daily at 03:00)"
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-blue-600' : 'text-gray-500'}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh from GitHub'}
+          </button>
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 transition-colors"
+          >
+            <UserPlus className="h-4 w-4" />
+            Add Developer
+          </button>
+        </div>
       </div>
 
       {/* Add Developer Form */}
