@@ -17,7 +17,11 @@ function saveDevelopers(devs) {
 
 /**
  * Persistent developer roster stored in localStorage.
- * Each developer: { username, jiraUsername, avatar, primary_expertise, experience_level, top_skills, analysis, addedAt }
+ * Each developer: { username, email, jiraUsername, avatar, primary_expertise, experience_level, top_skills, analysis, addedAt }
+ *
+ * `email` is the developer's Jira account email — used for inviting them to Jira and
+ * for the explicit lookup when assigning issues. `jiraUsername` is the legacy display-name
+ * fallback; new code should prefer `email`.
  */
 export function useDevelopers() {
   // Synchronous init — reads localStorage immediately so no component ever
@@ -34,15 +38,28 @@ export function useDevelopers() {
     (dev) => {
       const exists = developers.find((d) => d.username === dev.username);
       if (exists) {
-        // Merge — update analysis but keep jiraUsername if already set
+        // Merge — update analysis but keep email/jiraUsername if already set
         const updated = developers.map((d) =>
           d.username === dev.username
-            ? { ...d, ...dev, jiraUsername: d.jiraUsername || dev.jiraUsername || '' }
+            ? {
+                ...d,
+                ...dev,
+                email: d.email || dev.email || '',
+                jiraUsername: d.jiraUsername || dev.jiraUsername || '',
+              }
             : d
         );
         persist(updated);
       } else {
-        persist([...developers, { ...dev, jiraUsername: dev.jiraUsername || '', addedAt: new Date().toISOString() }]);
+        persist([
+          ...developers,
+          {
+            ...dev,
+            email: dev.email || '',
+            jiraUsername: dev.jiraUsername || '',
+            addedAt: new Date().toISOString(),
+          },
+        ]);
       }
     },
     [developers, persist]
@@ -54,9 +71,19 @@ export function useDevelopers() {
       for (const dev of devs) {
         const idx = updated.findIndex((d) => d.username === dev.username);
         if (idx >= 0) {
-          updated[idx] = { ...updated[idx], ...dev, jiraUsername: updated[idx].jiraUsername || dev.jiraUsername || '' };
+          updated[idx] = {
+            ...updated[idx],
+            ...dev,
+            email: updated[idx].email || dev.email || '',
+            jiraUsername: updated[idx].jiraUsername || dev.jiraUsername || '',
+          };
         } else {
-          updated.push({ ...dev, jiraUsername: dev.jiraUsername || '', addedAt: new Date().toISOString() });
+          updated.push({
+            ...dev,
+            email: dev.email || '',
+            jiraUsername: dev.jiraUsername || '',
+            addedAt: new Date().toISOString(),
+          });
         }
       }
       persist(updated);
@@ -68,6 +95,16 @@ export function useDevelopers() {
     (username, jiraUsername) => {
       const updated = developers.map((d) =>
         d.username === username ? { ...d, jiraUsername } : d
+      );
+      persist(updated);
+    },
+    [developers, persist]
+  );
+
+  const updateEmail = useCallback(
+    (username, email) => {
+      const updated = developers.map((d) =>
+        d.username === username ? { ...d, email } : d
       );
       persist(updated);
     },
@@ -103,6 +140,7 @@ export function useDevelopers() {
     addDeveloper,
     addDevelopers,
     updateJiraUsername,
+    updateEmail,
     updateAvailability,
     removeDeveloper,
     getDeveloper,

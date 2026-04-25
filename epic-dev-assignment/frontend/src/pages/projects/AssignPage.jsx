@@ -27,7 +27,7 @@ function suggestSprintCount(deadline, totalStories, totalPoints) {
 export default function AssignPage() {
   const { projectId } = useParams();
   const { getProject, isLoaded, setAssignments, updateEpic, updateStory, updateProject } = useProjects();
-  const { developers: rosterDevs, isLoaded: rosterLoaded, addDevelopers: addToRoster } = useDevelopers();
+  const { developers: rosterDevs, isLoaded: rosterLoaded, addDevelopers: addToRoster, updateEmail: updateRosterEmail } = useDevelopers();
   const navigate = useNavigate();
   const project = getProject(projectId);
 
@@ -44,15 +44,15 @@ export default function AssignPage() {
   const [expandedEpics, setExpandedEpics] = useState({});
   const [showAddNew, setShowAddNew] = useState(false);
   const [reassigningStoryId, setReassigningStoryId] = useState(null);
-  // Auto-populate Jira mapping from roster's jiraUsername field
+  // Auto-populate Jira mapping from roster.
+  // Priority: project's saved map > roster.email > roster.jiraUsername
   const [jiraEmailMap, setJiraEmailMap] = useState(() => {
     const saved = project?.jiraEmailMap || {};
-    // Merge in jiraUsernames from roster for any devs not already mapped
     for (const dev of rosterDevs) {
       const uname = dev.username || dev.login;
-      if (dev.jiraUsername && !saved[uname]) {
-        saved[uname] = dev.jiraUsername;
-      }
+      if (saved[uname]) continue;
+      const best = dev.email || dev.jiraUsername;
+      if (best) saved[uname] = best;
     }
     return saved;
   });
@@ -659,6 +659,13 @@ export default function AssignPage() {
                     placeholder="Jira email (e.g. user@company.com)"
                     value={jiraEmailMap[username] || ''}
                     onChange={(e) => setJiraEmailMap(prev => ({ ...prev, [username]: e.target.value }))}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      // Persist to global roster so the user only types this once
+                      if (v && rosterDevs.find(r => (r.username || r.login) === username)) {
+                        updateRosterEmail(username, v);
+                      }
+                    }}
                     className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                   {jiraEmailMap[username] && (

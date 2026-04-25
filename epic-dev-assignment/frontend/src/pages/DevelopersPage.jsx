@@ -4,22 +4,24 @@ import { useProjects } from '../hooks/useProjects';
 import {
   Users, Search, Trash2, Save, ChevronDown, ChevronRight,
   Briefcase, GitBranch, Award, AlertCircle, Plus, X, Loader2, UserPlus,
-  Circle, Clock, Palmtree, RefreshCw,
+  Circle, Clock, Palmtree, RefreshCw, Mail,
 } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
 
 export default function DevelopersPage() {
-  const { developers, addDevelopers, updateJiraUsername, updateAvailability, removeDeveloper, isLoaded } = useDevelopers();
+  const { developers, addDevelopers, updateJiraUsername, updateEmail, updateAvailability, removeDeveloper, isLoaded } = useDevelopers();
   const { projects } = useProjects();
   const { notify } = useNotifications();
   const [search, setSearch] = useState('');
   const [editingJira, setEditingJira] = useState({});
+  const [editingEmail, setEditingEmail] = useState({});
   const [expandedDev, setExpandedDev] = useState(null);
   const [saveStatus, setSaveStatus] = useState({});
+  const [emailSaveStatus, setEmailSaveStatus] = useState({});
 
   // Add developer form
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newDevInputs, setNewDevInputs] = useState([{ github: '', jira: '' }]);
+  const [newDevInputs, setNewDevInputs] = useState([{ github: '', email: '', jira: '' }]);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState('');
   const [analyzeError, setAnalyzeError] = useState('');
@@ -37,6 +39,7 @@ export default function DevelopersPage() {
       // Map DB rows back into the localStorage roster shape and merge in.
       const refreshed = (data.developers || []).map(d => ({
         username: d.username,
+        email: d.email || '',
         jiraUsername: d.jira_username || '',
         avatar_url: d.avatar_url,
         primary_expertise: d.primary_expertise,
@@ -85,6 +88,7 @@ export default function DevelopersPage() {
     return developers.filter(
       (d) =>
         d.username.toLowerCase().includes(q) ||
+        (d.email || '').toLowerCase().includes(q) ||
         (d.jiraUsername || '').toLowerCase().includes(q) ||
         (d.primary_expertise || '').toLowerCase().includes(q)
     );
@@ -108,8 +112,26 @@ export default function DevelopersPage() {
     });
   };
 
+  const handleEmailChange = (username, value) => {
+    setEditingEmail((prev) => ({ ...prev, [username]: value }));
+  };
+
+  const handleEmailSave = (username) => {
+    const value = editingEmail[username];
+    if (value !== undefined) {
+      updateEmail(username, value.trim());
+      setEmailSaveStatus((prev) => ({ ...prev, [username]: true }));
+      setTimeout(() => setEmailSaveStatus((prev) => ({ ...prev, [username]: false })), 2000);
+    }
+    setEditingEmail((prev) => {
+      const copy = { ...prev };
+      delete copy[username];
+      return copy;
+    });
+  };
+
   const addInput = () => {
-    setNewDevInputs([...newDevInputs, { github: '', jira: '' }]);
+    setNewDevInputs([...newDevInputs, { github: '', email: '', jira: '' }]);
   };
 
   const removeInput = (i) => {
@@ -164,14 +186,17 @@ export default function DevelopersPage() {
         throw new Error('No developers could be analyzed. Check usernames and try again.');
       }
 
-      // Merge Jira usernames from the form
+      // Merge Jira emails + handles from the form
+      const emailMap = {};
       const jiraMap = {};
       for (const d of valid) {
-        if (d.jira.trim()) jiraMap[d.github.trim()] = d.jira.trim();
+        if (d.email?.trim()) emailMap[d.github.trim()] = d.email.trim();
+        if (d.jira?.trim()) jiraMap[d.github.trim()] = d.jira.trim();
       }
 
       const enriched = data.developers.map((dev) => ({
         ...dev,
+        email: emailMap[dev.username] || '',
         jiraUsername: jiraMap[dev.username] || '',
       }));
 
@@ -179,7 +204,7 @@ export default function DevelopersPage() {
       notify.success('Developers Added', `${enriched.length} developer${enriched.length > 1 ? 's' : ''} analyzed and added to roster`);
 
       // Reset form
-      setNewDevInputs([{ github: '', jira: '' }]);
+      setNewDevInputs([{ github: '', email: '', jira: '' }]);
       setShowAddForm(false);
       setAnalyzeProgress('');
     } catch (err) {
@@ -238,7 +263,7 @@ export default function DevelopersPage() {
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50/50 p-5">
           <h3 className="text-sm font-semibold text-gray-800 mb-1">Analyze & Add Developers</h3>
           <p className="text-xs text-gray-500 mb-4">
-            Enter GitHub usernames to analyze their commit history and expertise. Optionally add their Jira username for task assignment.
+            Enter GitHub usernames to analyze commits & expertise. Add a Jira email so they can be invited to Jira and assigned issues automatically.
           </p>
 
           <div className="space-y-2">
@@ -253,12 +278,20 @@ export default function DevelopersPage() {
                   className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                 />
                 <input
+                  type="email"
+                  value={d.email}
+                  onChange={(e) => updateInput(i, 'email', e.target.value)}
+                  placeholder="Jira Email (e.g. john@company.com)"
+                  disabled={analyzing}
+                  className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                />
+                <input
                   type="text"
                   value={d.jira}
                   onChange={(e) => updateInput(i, 'jira', e.target.value)}
-                  placeholder="Jira Username / Email"
+                  placeholder="Jira Display Name (optional)"
                   disabled={analyzing}
-                  className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-44 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                 />
                 {newDevInputs.length > 1 && (
                   <button
@@ -325,7 +358,7 @@ export default function DevelopersPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by username, Jira username, or expertise..."
+            placeholder="Search by username, email, Jira handle, or expertise..."
             className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
@@ -352,7 +385,8 @@ export default function DevelopersPage() {
             const assignments = devAssignments[dev.username] || [];
             const isExpanded = expandedDev === dev.username;
             const jiraValue = editingJira[dev.username] ?? dev.jiraUsername ?? '';
-            const hasJira = !!dev.jiraUsername;
+            const emailValue = editingEmail[dev.username] ?? dev.email ?? '';
+            const hasEmail = !!dev.email;
 
             return (
               <div
@@ -380,24 +414,50 @@ export default function DevelopersPage() {
                             {dev.primary_expertise}
                           </span>
                         )}
-                        {!hasJira && (
+                        {!hasEmail && (
                           <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600 flex items-center gap-1">
                             <AlertCircle className="h-3 w-3" />
-                            No Jira account
+                            No Jira email
                           </span>
                         )}
                       </div>
 
-                      {/* Jira Username Input */}
+                      {/* Jira Email Input — used for invites & assignment */}
                       <div className="mt-2 flex items-center gap-2">
-                        <label className="text-xs font-medium text-gray-400 whitespace-nowrap">Jira Username:</label>
+                        <label className="text-xs font-medium text-gray-400 whitespace-nowrap flex items-center gap-1">
+                          <Mail className="h-3 w-3" /> Jira Email:
+                        </label>
+                        <input
+                          type="email"
+                          value={emailValue}
+                          onChange={(e) => handleEmailChange(dev.username, e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleEmailSave(dev.username)}
+                          placeholder="e.g. john@company.com"
+                          className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-sm text-gray-700 placeholder:text-gray-300 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 w-72"
+                        />
+                        {editingEmail[dev.username] !== undefined && (
+                          <button
+                            onClick={() => handleEmailSave(dev.username)}
+                            className="rounded-md bg-blue-600 p-1.5 text-white hover:bg-blue-700 transition-colors"
+                          >
+                            <Save className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {emailSaveStatus[dev.username] && (
+                          <span className="text-xs text-green-600 font-medium">Saved!</span>
+                        )}
+                      </div>
+
+                      {/* Jira Display Name (optional fallback) */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <label className="text-xs font-medium text-gray-400 whitespace-nowrap">Jira Display Name:</label>
                         <input
                           type="text"
                           value={jiraValue}
                           onChange={(e) => handleJiraChange(dev.username, e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleJiraSave(dev.username)}
-                          placeholder="e.g. john.doe or email"
-                          className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-sm text-gray-700 placeholder:text-gray-300 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 w-56"
+                          placeholder="optional — used as fallback search"
+                          className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-sm text-gray-700 placeholder:text-gray-300 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 w-72"
                         />
                         {editingJira[dev.username] !== undefined && (
                           <button

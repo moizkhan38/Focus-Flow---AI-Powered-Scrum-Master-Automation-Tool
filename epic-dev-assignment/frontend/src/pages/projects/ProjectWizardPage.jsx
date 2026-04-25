@@ -83,7 +83,7 @@ function transformAssignmentsForProject(assignments) {
 function WizardContent() {
   const { currentStep, generatedEpics, developers, assignments, projectDescription, reset } = useWorkflow();
   const { addProject } = useProjects();
-  const { addDevelopers, developers: rosterDevs } = useDevelopers();
+  const { addDevelopers, developers: rosterDevs, updateEmail: updateRosterEmail } = useDevelopers();
   const { notify } = useNotifications();
   const navigate = useNavigate();
 
@@ -97,16 +97,17 @@ function WizardContent() {
   const [sprintCount, setSprintCount] = useState('');
   const [jiraEmails, setJiraEmails] = useState({});
 
-  // Pre-populate jiraEmails from roster when developers are loaded
-  // Roster email takes priority over developer object (which may have stale data)
+  // Pre-populate jiraEmails from roster when developers are loaded.
+  // Priority: roster.email → roster.jiraUsername → dev.email → dev.jiraUsername
+  // (roster is the source of truth; the analyzed dev object may not have an email yet)
   useEffect(() => {
     if (!developers?.length) return;
     setJiraEmails(prev => {
       const updated = { ...prev };
       for (const d of developers) {
         if (updated[d.username]) continue; // user already edited this field
-        const rosterJira = rosterDevs.find(r => r.username === d.username)?.jiraUsername;
-        const best = rosterJira || d.jiraUsername;
+        const rosterDev = rosterDevs.find(r => r.username === d.username);
+        const best = rosterDev?.email || rosterDev?.jiraUsername || d.email || d.jiraUsername;
         if (best) updated[d.username] = best;
       }
       return updated;
@@ -217,9 +218,13 @@ function WizardContent() {
           sprintCount: parseInt(sprintCount) || 1,
           projectName: name,
           developerJiraMap: developers.reduce((map, d) => {
-            // Priority: user-edited override > roster (most up-to-date) > developer object
-            const rosterJira = rosterDevs.find((r) => r.username === d.username)?.jiraUsername;
-            const jira = jiraEmails[d.username] || rosterJira || d.jiraUsername;
+            // Priority: user-edited override > roster.email > roster.jiraUsername > dev.email > dev.jiraUsername
+            const rosterDev = rosterDevs.find((r) => r.username === d.username);
+            const jira = jiraEmails[d.username]
+              || rosterDev?.email
+              || rosterDev?.jiraUsername
+              || d.email
+              || d.jiraUsername;
             if (jira) map[d.username] = jira;
             return map;
           }, {}),
@@ -246,12 +251,18 @@ function WizardContent() {
         };
       });
 
-      // Persist developers with any edited Jira emails to the roster
+      // Persist developers with any edited Jira emails to the roster.
+      // The wizard input is an email, so user-edited values are saved as `email`.
       if (developers.length > 0) {
-        const devsWithJira = developers.map(d => ({
-          ...d,
-          jiraUsername: jiraEmails[d.username] || d.jiraUsername || rosterDevs.find(r => r.username === d.username)?.jiraUsername || '',
-        }));
+        const devsWithJira = developers.map(d => {
+          const rosterDev = rosterDevs.find(r => r.username === d.username);
+          const editedEmail = jiraEmails[d.username];
+          return {
+            ...d,
+            email: editedEmail || rosterDev?.email || d.email || '',
+            jiraUsername: rosterDev?.jiraUsername || d.jiraUsername || '',
+          };
+        });
         addDevelopers(devsWithJira);
       }
 
@@ -294,10 +305,15 @@ function WizardContent() {
     const flatAssignments = transformAssignmentsForProject(assignments);
 
     if (developers.length > 0) {
-      const devsWithJira = developers.map(d => ({
-        ...d,
-        jiraUsername: jiraEmails[d.username] || d.jiraUsername || rosterDevs.find(r => r.username === d.username)?.jiraUsername || '',
-      }));
+      const devsWithJira = developers.map(d => {
+        const rosterDev = rosterDevs.find(r => r.username === d.username);
+        const editedEmail = jiraEmails[d.username];
+        return {
+          ...d,
+          email: editedEmail || rosterDev?.email || d.email || '',
+          jiraUsername: rosterDev?.jiraUsername || d.jiraUsername || '',
+        };
+      });
       addDevelopers(devsWithJira);
     }
 
@@ -457,9 +473,11 @@ function WizardContent() {
                   </p>
                   <div className="space-y-2">
                     {developers.map((dev) => {
-                      const rosterJira = rosterDevs.find(r => r.username === dev.username)?.jiraUsername || '';
-                      const currentValue = jiraEmails[dev.username] ?? dev.jiraUsername ?? rosterJira;
-                      const hasJira = !!(jiraEmails[dev.username] || dev.jiraUsername || rosterJira);
+                      const rosterDev = rosterDevs.find(r => r.username === dev.username);
+                      const rosterEmail = rosterDev?.email || '';
+                      const rosterJira = rosterDev?.jiraUsername || '';
+                      const currentValue = jiraEmails[dev.username] ?? rosterEmail ?? dev.email ?? rosterJira ?? dev.jiraUsername ?? '';
+                      const hasJira = !!(jiraEmails[dev.username] || rosterEmail || dev.email || rosterJira || dev.jiraUsername);
                       return (
                         <div key={dev.username} className="flex items-center gap-3">
                           <img
@@ -471,9 +489,16 @@ function WizardContent() {
                           <div className="flex-1 flex items-center gap-2">
                             <Mail className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
                             <input
-                              type="text"
+                              type="email"
                               value={currentValue}
                               onChange={(e) => setJiraEmails(prev => ({ ...prev, [dev.username]: e.target.value }))}
+                              onBlur={(e) => {
+                                const v = e.target.value.trim();
+                                // Persist to global roster so the user only types this once
+                                if (v && rosterDevs.find(r => r.username === dev.username)) {
+                                  updateRosterEmail(dev.username, v);
+                                }
+                              }}
                               placeholder="Jira email (e.g. john@company.com)"
                               className="flex-1 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 px-3 py-2 text-sm
                                          focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
@@ -489,8 +514,8 @@ function WizardContent() {
                     })}
                   </div>
                   {developers.some(d => {
-                    const rosterJira = rosterDevs.find(r => r.username === d.username)?.jiraUsername || '';
-                    return !(jiraEmails[d.username] || d.jiraUsername || rosterJira);
+                    const rosterDev = rosterDevs.find(r => r.username === d.username);
+                    return !(jiraEmails[d.username] || rosterDev?.email || d.email || rosterDev?.jiraUsername || d.jiraUsername);
                   }) && (
                     <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
                       <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
