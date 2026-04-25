@@ -2,7 +2,9 @@ import 'dotenv/config';
 import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
+import cron from 'node-cron';
 import { Server as SocketIOServer } from 'socket.io';
+import { refreshAllDevelopers } from './services/developerRefresher.js';
 import epicsRouter from './routes/epics.js';
 import developersRouter from './routes/developers.js';
 import assignmentRouter from './routes/assignment.js';
@@ -75,4 +77,14 @@ httpServer.listen(PORT, async () => {
   console.log(`🔌 Socket.io listening on http://localhost:${PORT}`);
   const dbOk = await pingDb();
   console.log(dbOk ? '🗄️  PostgreSQL: connected' : '⚠️  PostgreSQL: unreachable (set DATABASE_URL in .env)');
+
+  // Daily developer roster refresh — re-fetches each developer's GitHub stats at 03:00.
+  // Override with DEV_REFRESH_CRON env var, e.g. "0 */6 * * *" for every 6 hours.
+  if (dbOk) {
+    const schedule = process.env.DEV_REFRESH_CRON || '0 3 * * *';
+    cron.schedule(schedule, () => {
+      refreshAllDevelopers().catch(err => console.error('[DevRefresh] cron failed:', err.message));
+    });
+    console.log(`⏰ Developer refresh scheduled: "${schedule}"`);
+  }
 });
