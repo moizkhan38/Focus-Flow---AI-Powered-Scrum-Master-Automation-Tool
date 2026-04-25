@@ -728,8 +728,26 @@ def get_all_slack_members():
     return members
 
 
+# Tracks who has already received a reminder today: {date_str: set(user_ids)}.
+# Lets us escalate copy on subsequent pings without spamming "Good morning!" repeatedly.
+_reminded_today = {}
+
+
+def _users_submitted_today():
+    """Return the set of user_ids who already submitted a standup today."""
+    today_str = date.today().isoformat()
+    db_data = _load_standups_from_db()
+    standup_data = db_data if db_data is not None else _load_standups_from_json()
+    return {
+        e.get("user_id")
+        for e in standup_data
+        if (e.get("timestamp") or "").startswith(today_str) and e.get("user_id")
+    }
+
+
 def send_standup_reminder():
-    """Send a morning reminder to all users to submit their standup."""
+    """Send a standup reminder, skipping people who already submitted and
+    escalating the copy for people who've already been pinged today."""
     print("[REMINDER] Sending standup reminders...")
     members = get_all_slack_members()
     print(f"[REMINDER] Found {len(members)} members: {[m['name'] for m in members]}")
@@ -738,20 +756,49 @@ def send_standup_reminder():
         print("[REMINDER] ERROR: No members found! Check SLACK_BOT_TOKEN and users:read scope.")
         return
 
-    blocks = _build_reminder_blocks(
+    today_str = date.today().isoformat()
+    # Reset the per-day tracker if the calendar has rolled over.
+    reminded = _reminded_today.setdefault(today_str, set())
+    submitted = _users_submitted_today()
+
+    morning_blocks = _build_reminder_blocks(
         "Daily Standup Reminder",
         "Good morning! Time to submit your daily standup.",
     )
+    nudge_blocks = _build_reminder_blocks(
+        "Standup Reminder",
+        "You haven't submitted your standup yet today — please submit it now.",
+    )
+
+    sent = skipped_done = nudged = 0
     for member in members:
+        uid = member["id"]
+        if uid in submitted:
+            skipped_done += 1
+            continue
+
+        first_time = uid not in reminded
+        blocks = morning_blocks if first_time else nudge_blocks
+        fallback = (
+            "Daily Standup Reminder — submit your standup"
+            if first_time
+            else "Standup reminder — you haven't submitted yet"
+        )
         try:
-            slack_client.chat_postMessage(
-                channel=member["id"],
-                text="Daily Standup Reminder — submit your standup",  # fallback for notifications
-                blocks=blocks,
-            )
-            print(f"[SUCCESS] Reminder sent to {member['name']}")
+            slack_client.chat_postMessage(channel=uid, text=fallback, blocks=blocks)
+            reminded.add(uid)
+            if first_time:
+                sent += 1
+            else:
+                nudged += 1
+            print(f"[SUCCESS] {'First ping' if first_time else 'Follow-up'} sent to {member['name']}")
         except Exception as e:
             print(f"[WARNING] Could not remind {member['name']}: {e}")
+
+    print(
+        f"[REMINDER] {sent} first-time, {nudged} follow-ups, "
+        f"{skipped_done} skipped (already submitted)"
+    )
 
 
 def check_missing_standups():
