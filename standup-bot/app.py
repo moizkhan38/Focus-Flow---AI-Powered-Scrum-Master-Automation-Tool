@@ -772,7 +772,7 @@ def test_stale():
 scheduler = BackgroundScheduler()
 scheduler.add_job(check_for_proactive_blockers, "interval", days=1)
 scheduler.add_job(send_standup_reminder, "interval", days=1)
-scheduler.add_job(check_missing_standups, "interval", minutes=2)
+scheduler.add_job(check_missing_standups, "interval", days=1)
 scheduler.start()
 
 if __name__ == "__main__":
