@@ -40,13 +40,18 @@ const chartTooltip = {
   itemStyle: { color: '#1f2937' }, labelStyle: { color: '#6b7280' }
 };
 
-function ProjectDescription({ text }) {
+function ProjectDescription({ text, project }) {
   const [expanded, setExpanded] = useState(false);
   const MAX_LEN = 180;
   const isLong = text.length > MAX_LEN;
 
+  // Only approved (or status-less, for projects pre-approval flow) epics & stories.
+  const approvedEpics = (project?.epics || []).filter(e => !e.status || e.status === 'approved');
+  const approvedStoriesOf = (epic) =>
+    (epic.stories || []).filter(s => !s.status || s.status === 'approved');
+
   return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/80 max-w-2xl">
+    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/80 max-w-3xl">
       <button
         onClick={() => setExpanded(v => !v)}
         className="w-full flex items-center justify-between px-3.5 py-2.5 text-left group"
@@ -54,6 +59,11 @@ function ProjectDescription({ text }) {
         <span className="flex items-center gap-2 text-xs font-semibold text-gray-600">
           <FileText className="h-3.5 w-3.5" />
           Project Description
+          {approvedEpics.length > 0 && (
+            <span className="text-[10px] font-normal text-gray-400">
+              · {approvedEpics.length} epic{approvedEpics.length !== 1 ? 's' : ''}
+            </span>
+          )}
         </span>
         <ChevronDown className={`h-3.5 w-3.5 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
@@ -66,7 +76,101 @@ function ProjectDescription({ text }) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <p className="px-3.5 pb-3 text-sm text-gray-500 leading-relaxed whitespace-pre-wrap">{text}</p>
+            <div className="px-3.5 pb-3 space-y-4">
+              {/* Original description */}
+              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{text}</p>
+
+              {/* Approved epics → stories → acceptance criteria + test cases */}
+              {approvedEpics.length > 0 && (
+                <div className="border-t border-gray-200 pt-3 space-y-3">
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    Approved Scope
+                  </h4>
+                  {approvedEpics.map((epic) => {
+                    const stories = approvedStoriesOf(epic);
+                    return (
+                      <div key={epic.id || epic.epic_id} className="rounded-lg border border-gray-200 bg-white p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-xs font-semibold text-gray-800">{epic.title || epic.epic_title}</span>
+                          {epic.jiraKey && (
+                            <span className="text-[10px] font-mono text-blue-600">{epic.jiraKey}</span>
+                          )}
+                          <span className="ml-auto text-[10px] text-gray-400">
+                            {stories.length} stor{stories.length === 1 ? 'y' : 'ies'}
+                          </span>
+                        </div>
+                        {epic.description && (
+                          <p className="text-[11px] text-gray-500 mb-2 whitespace-pre-wrap">{epic.description}</p>
+                        )}
+                        {stories.length > 0 && (
+                          <ul className="space-y-2">
+                            {stories.map((story) => {
+                              const ac = story.acceptanceCriteria;
+                              const tcs = story.testCases || [];
+                              return (
+                                <li key={story.id || story.story_id} className="rounded-md bg-gray-50 p-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px] font-medium text-gray-700 flex-1">{story.title || story.story_title}</span>
+                                    {story.storyPoints > 0 && (
+                                      <span className="text-[10px] font-mono bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">{story.storyPoints} SP</span>
+                                    )}
+                                    {story.jiraKey && (
+                                      <span className="text-[10px] font-mono text-blue-600">{story.jiraKey}</span>
+                                    )}
+                                  </div>
+                                  {story.description && (
+                                    <p className="text-[11px] text-gray-500 mt-1 whitespace-pre-wrap">{story.description}</p>
+                                  )}
+                                  {ac && (
+                                    <div className="mt-2 rounded border border-emerald-100 bg-emerald-50/50 p-2">
+                                      <div className="flex items-center gap-1.5 mb-1">
+                                        <ClipboardCheck className="w-3 h-3 text-emerald-600" />
+                                        <span className="text-[9px] font-semibold uppercase tracking-wider text-emerald-700">Acceptance Criteria</span>
+                                      </div>
+                                      <p className="text-[11px] text-gray-700 whitespace-pre-line">{ac}</p>
+                                    </div>
+                                  )}
+                                  {tcs.length > 0 && (
+                                    <div className="mt-2 space-y-1.5">
+                                      {tcs.map((tc, i) => (
+                                        <div key={i} className="rounded border border-blue-100 bg-blue-50/50 p-2">
+                                          <div className="flex items-center gap-1.5 mb-1">
+                                            <FileText className="w-3 h-3 text-blue-600" />
+                                            <span className="text-[9px] font-semibold uppercase tracking-wider text-blue-700">Test Case</span>
+                                            {tc.id && <span className="text-[9px] font-mono bg-blue-100 text-blue-600 rounded px-1 py-0.5">{tc.id}</span>}
+                                          </div>
+                                          {tc.description && <p className="text-[11px] text-gray-700">{tc.description}</p>}
+                                          {tc.preconditions && (
+                                            <p className="text-[11px] text-gray-600 mt-1"><span className="font-semibold text-gray-500">Preconditions:</span> {tc.preconditions}</p>
+                                          )}
+                                          {tc.userAction && (
+                                            <p className="text-[11px] text-gray-600 mt-1"><span className="font-semibold text-gray-500">Steps:</span> {tc.userAction}</p>
+                                          )}
+                                          {tc.expectedResults?.length > 0 && (
+                                            <div className="mt-1">
+                                              <span className="text-[10px] font-semibold text-gray-500 uppercase">Expected</span>
+                                              <ol className="list-decimal list-inside mt-0.5 space-y-0.5">
+                                                {tc.expectedResults.map((r, j) => (
+                                                  <li key={j} className="text-[11px] text-gray-600">{r}</li>
+                                                ))}
+                                              </ol>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1264,7 +1368,7 @@ function ProjectDetailPageInner() {
               )}
             </div>
             {(project.rawText || project.description) && (
-              <ProjectDescription text={project.rawText || project.description} />
+              <ProjectDescription text={project.rawText || project.description} project={project} />
             )}
             <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
               <span>{project.epics?.length || 0} epics · {totalStories} stories · {totalPoints} points</span>
