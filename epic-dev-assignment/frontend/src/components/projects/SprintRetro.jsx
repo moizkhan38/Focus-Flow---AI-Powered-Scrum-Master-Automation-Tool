@@ -130,7 +130,7 @@ export default function SprintRetro({ projectId }) {
                   value={newItem}
                   onChange={(e) => setNewItem(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addItem()}
-                  placeholder={`Add to "${categories.find((c) => c.key === activeCategory)?.label}"...`}
+                  placeholder={`Add to "${categories.find((c) => c.key === activeCategory)?.label || 'category'}"...`}
                   className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 placeholder:text-gray-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
                 />
                 <button
