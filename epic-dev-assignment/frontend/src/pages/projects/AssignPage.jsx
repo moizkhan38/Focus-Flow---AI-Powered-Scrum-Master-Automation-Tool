@@ -655,14 +655,18 @@ export default function AssignPage() {
                     <span className="text-sm font-medium text-gray-700 truncate">{username}</span>
                   </div>
                   <input
-                    type="email"
-                    placeholder="Jira email (e.g. user@company.com)"
+                    type="text"
+                    placeholder="Jira email or display name (e.g. user@company.com)"
                     value={jiraEmailMap[username] || ''}
                     onChange={(e) => setJiraEmailMap(prev => ({ ...prev, [username]: e.target.value }))}
                     onBlur={(e) => {
                       const v = e.target.value.trim();
-                      // Persist to global roster so the user only types this once
-                      if (v && rosterDevs.find(r => (r.username || r.login) === username)) {
+                      if (!v) return;
+                      const rosterDev = rosterDevs.find(r => (r.username || r.login) === username);
+                      if (!rosterDev) return;
+                      // Email → roster.email; display name → roster.jiraUsername.
+                      // Lets the user disambiguate two Jira accounts that share an email.
+                      if (v.includes('@')) {
                         updateRosterEmail(username, v);
                       }
                     }}

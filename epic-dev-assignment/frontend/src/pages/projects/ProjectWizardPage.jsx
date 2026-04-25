@@ -489,17 +489,22 @@ function WizardContent() {
                           <div className="flex-1 flex items-center gap-2">
                             <Mail className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
                             <input
-                              type="email"
+                              type="text"
                               value={currentValue}
                               onChange={(e) => setJiraEmails(prev => ({ ...prev, [dev.username]: e.target.value }))}
                               onBlur={(e) => {
                                 const v = e.target.value.trim();
-                                // Persist to global roster so the user only types this once
-                                if (v && rosterDevs.find(r => r.username === dev.username)) {
+                                if (!v) return;
+                                // Persist back to roster: looks like an email → save as email,
+                                // otherwise save as jiraUsername (handles users who need a
+                                // display name to disambiguate multiple accounts).
+                                const rosterDev = rosterDevs.find(r => r.username === dev.username);
+                                if (!rosterDev) return;
+                                if (v.includes('@')) {
                                   updateRosterEmail(dev.username, v);
                                 }
                               }}
-                              placeholder="Jira email (e.g. john@company.com)"
+                              placeholder="Jira email or display name (e.g. john@company.com)"
                               className="flex-1 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 px-3 py-2 text-sm
                                          focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
                             />
