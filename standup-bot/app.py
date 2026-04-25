@@ -514,18 +514,46 @@ def api_health():
     return jsonify({'status': 'running', 'service': 'Focus Flow Standup', 'port': 3000}), 200
 
 
-@app.route('/api/standup/history', methods=['GET'])
-def api_standup_history():
-    """Return standup history for the manager dashboard."""
+def _load_standups_from_db(project_key=None):
+    """Read standups from Postgres via the Express backend. Returns None on failure."""
+    try:
+        url = EXPRESS_DB_URL  # GET on the same URL that POST writes to
+        params = {"limit": 200}
+        if project_key:
+            params["project_key"] = project_key
+        resp = requests.get(url, params=params, timeout=5)
+        if not resp.ok:
+            print(f"[HISTORY] DB read returned {resp.status_code}")
+            return None
+        return resp.json()
+    except Exception as e:
+        print(f"[HISTORY] DB read failed, falling back to JSON: {e}")
+        return None
+
+
+def _load_standups_from_json(project_key=None):
     try:
         with open("standup_data.json", "r") as f:
-            standup_data = json.load(f)
+            data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        standup_data = []
-
-    project_key = request.args.get('project_key')
+        data = []
     if project_key:
-        standup_data = [s for s in standup_data if s.get('project_key') == project_key]
+        data = [s for s in data if s.get('project_key') == project_key]
+    return data
+
+
+@app.route('/api/standup/history', methods=['GET'])
+def api_standup_history():
+    """Return standup history. Reads from Postgres first (the primary write
+    target), falling back to standup_data.json so older entries aren't lost."""
+    project_key = request.args.get('project_key')
+
+    # Primary source: Postgres (matches the write path priority).
+    standup_data = _load_standups_from_db(project_key)
+    if standup_data is None:
+        standup_data = _load_standups_from_json(project_key)
+        # JSON is stored oldest-first; sort to match DB (newest-first).
+        standup_data.sort(key=lambda s: s.get('timestamp') or '', reverse=True)
 
     # Enrich with Slack display names where possible
     for entry in standup_data:
@@ -538,7 +566,6 @@ def api_standup_history():
                 entry['user_name'] = entry['user_id']
                 entry['avatar'] = ''
 
-    standup_data.reverse()
     return jsonify({'success': True, 'standups': standup_data})
 
 
@@ -685,16 +712,13 @@ def check_missing_standups():
 
     today_str = date.today().isoformat()
 
-    # Get today's submissions from standup_data.json
+    # Get today's submissions — Postgres first, JSON fallback (matches the write path).
     submitted_users = set()
-    try:
-        with open("standup_data.json", "r") as f:
-            standup_data = json.load(f)
-        for entry in standup_data:
-            if entry.get("timestamp", "").startswith(today_str):
-                submitted_users.add(entry.get("user_id"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
+    db_data = _load_standups_from_db()
+    standup_data = db_data if db_data is not None else _load_standups_from_json()
+    for entry in standup_data:
+        if entry.get("timestamp", "").startswith(today_str):
+            submitted_users.add(entry.get("user_id"))
 
     # Get all workspace members and find who hasn't submitted
     members = get_all_slack_members()
