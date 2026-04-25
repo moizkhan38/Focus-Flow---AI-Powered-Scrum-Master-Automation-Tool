@@ -29,6 +29,53 @@ jira = Jira(
 # creation under rapid /standup submissions.
 background_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="standup-bg")
 
+# Jira project cache. Slack slash commands must respond in <3s, so we can't
+# call Jira inline. Cache the project list and refresh in the background.
+_jira_projects_cache = {"options": [], "fetched_at": 0}
+JIRA_PROJECTS_TTL_SECONDS = 300  # refresh every 5 minutes
+
+
+def _build_default_project_options():
+    default_key = os.environ.get("JIRA_PROJECT_KEY", "SCRUM")
+    return [
+        {
+            "text": {"type": "plain_text", "text": default_key},
+            "value": default_key,
+        }
+    ]
+
+
+def refresh_jira_projects_cache():
+    """Fetch Jira projects and update the cache. Safe to call from a background thread."""
+    import time
+    try:
+        projects = jira.get("rest/api/3/project")
+        options = [
+            {
+                "text": {"type": "plain_text", "text": f"{p['name']} ({p['key']})"},
+                "value": p["key"],
+            }
+            for p in projects
+        ] or _build_default_project_options()
+        _jira_projects_cache["options"] = options
+        _jira_projects_cache["fetched_at"] = time.time()
+        print(f"[JIRA-CACHE] Refreshed {len(options)} project options")
+    except Exception as e:
+        print(f"[JIRA-CACHE] Refresh failed: {e}")
+        if not _jira_projects_cache["options"]:
+            _jira_projects_cache["options"] = _build_default_project_options()
+
+
+def get_cached_project_options():
+    """Return cached project options, falling back to defaults if cache is empty."""
+    import time
+    if not _jira_projects_cache["options"]:
+        return _build_default_project_options()
+    # Trigger an async refresh if stale, but always return what we have now.
+    if time.time() - _jira_projects_cache["fetched_at"] > JIRA_PROJECTS_TTL_SECONDS:
+        background_executor.submit(refresh_jira_projects_cache)
+    return _jira_projects_cache["options"]
+
 
 # --- Jira Actions ---
 
@@ -355,38 +402,16 @@ def analyze_standup():
 
 @app.route("/slack/command", methods=["POST"])
 def slash_command():
-    """Handle the /standup slash command and open the modal form."""
+    """Handle the /standup slash command. Acknowledges Slack within milliseconds
+    and opens the modal in a background thread to stay under Slack's 3s deadline."""
     trigger_id = request.form.get("trigger_id")
+    if trigger_id:
+        background_executor.submit(_open_standup_modal_async, trigger_id)
+    return "", 200
 
-    # Fetch all Jira projects for the dropdown
-    try:
-        projects = jira.get("rest/api/3/project")
-        project_options = [
-            {
-                "text": {
-                    "type": "plain_text",
-                    "text": f"{p['name']} ({p['key']})",
-                },
-                "value": p["key"],
-            }
-            for p in projects
-        ]
-    except Exception:
-        project_options = []
 
-    if not project_options:
-        default_key = os.environ.get("JIRA_PROJECT_KEY", "SCRUM")
-        project_options = [
-            {
-                "text": {
-                    "type": "plain_text",
-                    "text": default_key,
-                },
-                "value": default_key,
-            }
-        ]
-
-    modal = {
+def _build_standup_modal(project_options):
+    return {
         "type": "modal",
         "callback_id": "st_sub",
         "title": {"type": "plain_text", "text": "Focus Flow"},
@@ -398,61 +423,42 @@ def slash_command():
                 "element": {
                     "type": "static_select",
                     "action_id": "p_i",
-                    "placeholder": {
-                        "type": "plain_text",
-                        "text": "Select a project",
-                    },
+                    "placeholder": {"type": "plain_text", "text": "Select a project"},
                     "options": project_options,
                 },
-                "label": {
-                    "type": "plain_text",
-                    "text": "Which project is this standup for?",
-                },
+                "label": {"type": "plain_text", "text": "Which project is this standup for?"},
             },
             {
                 "type": "input",
                 "block_id": "y_b",
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "y_i",
-                    "multiline": True,
-                },
-                "label": {
-                    "type": "plain_text",
-                    "text": "What have you done yesterday?",
-                },
+                "element": {"type": "plain_text_input", "action_id": "y_i", "multiline": True},
+                "label": {"type": "plain_text", "text": "What have you done yesterday?"},
             },
             {
                 "type": "input",
                 "block_id": "t_b",
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "t_i",
-                    "multiline": True,
-                },
-                "label": {
-                    "type": "plain_text",
-                    "text": "What will you do today?",
-                },
+                "element": {"type": "plain_text_input", "action_id": "t_i", "multiline": True},
+                "label": {"type": "plain_text", "text": "What will you do today?"},
             },
             {
                 "type": "input",
                 "block_id": "b_b",
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "b_i",
-                    "multiline": True,
-                },
-                "label": {
-                    "type": "plain_text",
-                    "text": "Have you faced any blockers?",
-                },
+                "element": {"type": "plain_text_input", "action_id": "b_i", "multiline": True},
+                "label": {"type": "plain_text", "text": "Have you faced any blockers?"},
                 "optional": True,
             },
         ],
     }
-    slack_client.views_open(trigger_id=trigger_id, view=modal)
-    return "", 200
+
+
+def _open_standup_modal_async(trigger_id):
+    """Open the standup modal in a background thread. trigger_id is valid for ~3s."""
+    try:
+        project_options = get_cached_project_options()
+        modal = _build_standup_modal(project_options)
+        slack_client.views_open(trigger_id=trigger_id, view=modal)
+    except Exception as e:
+        print(f"[STANDUP] Failed to open modal: {e}")
 
 
 @app.route("/slack/events", methods=["POST"])
@@ -773,7 +779,12 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(check_for_proactive_blockers, "interval", days=1)
 scheduler.add_job(send_standup_reminder, "interval", days=1)
 scheduler.add_job(check_missing_standups, "interval", days=1)
+# Keep the Jira project list warm so /standup never has to call Jira inline.
+scheduler.add_job(refresh_jira_projects_cache, "interval", minutes=5)
 scheduler.start()
+
+# Prime the cache on startup (in the background — never block boot).
+background_executor.submit(refresh_jira_projects_cache)
 
 if __name__ == "__main__":
     app.run(port=3000)
