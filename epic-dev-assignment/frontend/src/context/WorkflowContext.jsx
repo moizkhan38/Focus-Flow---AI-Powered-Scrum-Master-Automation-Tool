@@ -390,14 +390,21 @@ export function WorkflowProvider({ children }) {
       }));
     },
 
-    reassignEpic: (epicId, newDeveloperUsername) => {
+    reassignEpic: (idOrStoryId, newDeveloperUsername) => {
       setState(prev => {
-        const assignmentIndex = prev.assignments.findIndex(a => a.epic.epic_id === epicId);
+        // Match by story_id first (story-level reassign), then fall back to epic_id (legacy)
+        let assignmentIndex = prev.assignments.findIndex(a => a.story?.story_id === idOrStoryId);
+        if (assignmentIndex === -1) {
+          assignmentIndex = prev.assignments.findIndex(a => a.epic?.epic_id === idOrStoryId);
+        }
         if (assignmentIndex === -1) return prev;
 
         const oldAssignment = prev.assignments[assignmentIndex];
-        const oldDev = oldAssignment.developer.username;
-        const storyPoints = oldAssignment.epic.totalStoryPoints;
+        const oldDev = oldAssignment.developer?.username;
+        const storyPoints =
+          oldAssignment.story?.story_points
+          ?? oldAssignment.epic?.totalStoryPoints
+          ?? 0;
         const newDev = prev.developers.find(d => d.username === newDeveloperUsername);
         if (!newDev) return prev;
 
@@ -425,9 +432,9 @@ export function WorkflowProvider({ children }) {
             ...a,
             developer: {
               username: newDev.username,
-              expertise: newDev.analysis.expertise.primary,
-              experienceLevel: newDev.analysis.experienceLevel.level,
-              avatar: newDev.avatar
+              expertise: newDev.analysis?.expertise?.primary || newDev.primary_expertise || 'Full Stack',
+              experienceLevel: newDev.analysis?.experienceLevel?.level || newDev.experience_level || 'Junior',
+              avatar: newDev.avatar || newDev.avatar_url || `https://github.com/${newDev.username}.png`
             },
             score: recalcScore,
             breakdown: {
@@ -439,14 +446,14 @@ export function WorkflowProvider({ children }) {
           };
         });
 
+        const updatedWorkload = { ...prev.workloadDistribution };
+        if (oldDev) updatedWorkload[oldDev] = (updatedWorkload[oldDev] || 0) - storyPoints;
+        updatedWorkload[newDeveloperUsername] = (updatedWorkload[newDeveloperUsername] || 0) + storyPoints;
+
         return {
           ...prev,
           assignments: newAssignments,
-          workloadDistribution: {
-            ...prev.workloadDistribution,
-            [oldDev]: (prev.workloadDistribution[oldDev] || 0) - storyPoints,
-            [newDeveloperUsername]: (prev.workloadDistribution[newDeveloperUsername] || 0) + storyPoints
-          }
+          workloadDistribution: updatedWorkload
         };
       });
     },
