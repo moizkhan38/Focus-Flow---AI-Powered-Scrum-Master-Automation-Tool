@@ -1,5 +1,6 @@
 import express from 'express';
 import { analyzeDeveloper } from '../services/githubService.js';
+import { query } from '../db.js';
 
 const router = express.Router();
 
@@ -61,6 +62,27 @@ router.post('/analyze-developers', async (req, res) => {
         error: 'All developer analyses failed. Check GitHub usernames and try again.',
         failedUsernames: results.filter(r => r.error).map(r => r.username)
       });
+    }
+
+    // Persist to Postgres so the daily refresh job can keep them up-to-date.
+    // Best-effort — never fail the analysis response if the DB write fails.
+    for (const d of devs) {
+      try {
+        await query(
+          `INSERT INTO developers
+             (username, avatar_url, primary_expertise, experience_level, top_skills, analysis)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (username) DO UPDATE SET
+             avatar_url        = EXCLUDED.avatar_url,
+             primary_expertise = EXCLUDED.primary_expertise,
+             experience_level  = EXCLUDED.experience_level,
+             top_skills        = EXCLUDED.top_skills,
+             analysis          = EXCLUDED.analysis`,
+          [d.username, d.avatar_url, d.primary_expertise, d.experience_level, d.top_skills, d.analysis || null]
+        );
+      } catch (err) {
+        console.warn(`[Developers] DB upsert failed for ${d.username}: ${err.message}`);
+      }
     }
 
     res.json({
