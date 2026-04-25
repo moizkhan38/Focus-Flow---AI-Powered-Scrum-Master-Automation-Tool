@@ -461,11 +461,47 @@ def _open_standup_modal_async(trigger_id):
         print(f"[STANDUP] Failed to open modal: {e}")
 
 
+# Block Kit action_id for the "Submit Standup" button on reminder DMs.
+SUBMIT_STANDUP_ACTION = "open_standup_modal"
+
+
+def _build_reminder_blocks(headline, body):
+    """Build a reminder DM with an inline 'Submit Standup' button.
+    Clicking the button opens the same modal /standup opens — no command to remember."""
+    return [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{headline}*\n{body}"},
+        },
+        {
+            "type": "actions",
+            "block_id": "standup_reminder_actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": SUBMIT_STANDUP_ACTION,
+                    "style": "primary",
+                    "text": {"type": "plain_text", "text": "📝 Submit Standup"},
+                }
+            ],
+        },
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": "Or type `/standup` if you prefer the command."}
+            ],
+        },
+    ]
+
+
 @app.route("/slack/events", methods=["POST"])
 def interactions():
-    """Handle Slack interactive events (modal submissions)."""
+    """Handle Slack interactive events: modal submissions and button clicks."""
     payload = json.loads(request.form.get("payload"))
-    if payload.get("type") == "view_submission":
+    payload_type = payload.get("type")
+
+    # Modal submission — process the standup
+    if payload_type == "view_submission":
         user_id = payload["user"]["id"]
         values = payload["view"]["state"]["values"]
         project_key = values["p_b"]["p_i"]["selected_option"]["value"]
@@ -477,6 +513,17 @@ def interactions():
             process_standup_logic, user_id, project_key, yesterday, today, blocker
         )
         return jsonify({"response_action": "clear"}), 200
+
+    # Button click on a reminder DM — open the standup modal
+    if payload_type == "block_actions":
+        for action in payload.get("actions", []):
+            if action.get("action_id") == SUBMIT_STANDUP_ACTION:
+                trigger_id = payload.get("trigger_id")
+                if trigger_id:
+                    background_executor.submit(_open_standup_modal_async, trigger_id)
+                break
+        return "", 200
+
     return "", 200
 
 
@@ -691,15 +738,16 @@ def send_standup_reminder():
         print("[REMINDER] ERROR: No members found! Check SLACK_BOT_TOKEN and users:read scope.")
         return
 
+    blocks = _build_reminder_blocks(
+        "Daily Standup Reminder",
+        "Good morning! Time to submit your daily standup.",
+    )
     for member in members:
         try:
             slack_client.chat_postMessage(
                 channel=member["id"],
-                text=(
-                    "*Daily Standup Reminder*\n"
-                    "Good morning! Time to submit your daily standup.\n"
-                    "Type `/standup` to get started."
-                ),
+                text="Daily Standup Reminder — submit your standup",  # fallback for notifications
+                blocks=blocks,
             )
             print(f"[SUCCESS] Reminder sent to {member['name']}")
         except Exception as e:
@@ -728,15 +776,16 @@ def check_missing_standups():
         print("[FOLLOWUP] All members have submitted their standups.")
         return
 
+    blocks = _build_reminder_blocks(
+        "Standup Follow-Up",
+        "You haven't submitted your standup today. Please submit it now.",
+    )
     for member in missing:
         try:
             slack_client.chat_postMessage(
                 channel=member["id"],
-                text=(
-                    "*Standup Follow-Up*\n"
-                    "You haven't submitted your standup today.\n"
-                    "Please type `/standup` to submit it now."
-                ),
+                text="Standup follow-up — please submit your standup",  # fallback
+                blocks=blocks,
             )
             print(f"[SUCCESS] Follow-up sent to {member['name']}")
         except Exception as e:
@@ -764,15 +813,16 @@ def test_reminder():
             results["errors"].append("No members returned. Check SLACK_BOT_TOKEN and users:read scope.")
             return jsonify(results), 200
 
+        blocks = _build_reminder_blocks(
+            "Daily Standup Reminder",
+            "Good morning! Time to submit your daily standup.",
+        )
         for member in members:
             try:
                 slack_client.chat_postMessage(
                     channel=member["id"],
-                    text=(
-                        "*Daily Standup Reminder*\n"
-                        "Good morning! Time to submit your daily standup.\n"
-                        "Type `/standup` to get started."
-                    ),
+                    text="Daily Standup Reminder — submit your standup",
+                    blocks=blocks,
                 )
                 results["sent"].append(member["name"])
             except Exception as e:
