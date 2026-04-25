@@ -1,5 +1,6 @@
 import express from 'express';
 import { query, ping } from '../db.js';
+import { refreshAllDevelopers } from '../services/developerRefresher.js';
 
 const router = express.Router();
 
@@ -209,6 +210,19 @@ router.delete('/db/developers/:username', async (req, res) => {
   try {
     await query(`DELETE FROM developers WHERE username = $1`, [req.params.username]);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manually trigger a refresh of every developer's GitHub stats.
+// The same job runs automatically on a daily cron (see server.js).
+router.post('/db/developers/refresh', async (_req, res) => {
+  try {
+    const summary = await refreshAllDevelopers();
+    // Return the freshly-updated rows so the frontend can replace its local cache.
+    const { rows } = await query(`SELECT * FROM developers ORDER BY username`);
+    res.json({ ...summary, developers: rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
