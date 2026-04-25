@@ -517,12 +517,12 @@ export default function AssignPage() {
                             }`}
                           >{a.confidence}</motion.span>
                           <select
+                            value={a.assigned_developer || ''}
                             onChange={(e) => handleReassign(a.story_id, e.target.value)}
                             className="rounded border border-gray-300 px-1.5 py-1 text-xs focus:border-blue-500 focus:outline-none w-28 transition-colors hover:border-blue-400"
-                            defaultValue=""
                             disabled={isReassigning}
                           >
-                            <option value="" disabled>Reassign...</option>
+                            {!a.assigned_developer && <option value="" disabled>Reassign...</option>}
                             {selectedDevs.map((d) => (
                               <option key={d.login || d.username} value={d.login || d.username}>{d.login || d.username}</option>
                             ))}
